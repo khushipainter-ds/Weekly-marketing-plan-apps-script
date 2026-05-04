@@ -31,5 +31,5 @@ Google Apps Script + Google Sheets.
 4. Open via Weekly Plan → Open Plan Form
 
 ## 📁 Project Structure
-- `Code.gs` — All backend logic (auth, save, load, triggers)
-- `Index.html` — Frontend form (UI + client-side JS)
+- `weekplansystemcode.gs.txt` — All backend logic (auth, save, load, triggers)
+- `weekplansystem.html` — Frontend form (UI + client-side JS)
