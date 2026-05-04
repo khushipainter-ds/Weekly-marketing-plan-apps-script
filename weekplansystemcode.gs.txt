@@ -1,0 +1,487 @@
+// ==================== MENU & FORM OPEN ====================
+function onOpen() {
+  SpreadsheetApp.getUi()
+    .createMenu('Weekly Plan')
+    .addItem('First Time Setup', 'firstTimeSetup')
+    .addItem('Open Plan Form', 'openForm')
+    .addSeparator()
+    .addItem('Add Next Week Rows', 'addNextWeekBlock')
+    .addItem('Reset Saturday Trigger', 'setupWeeklyTrigger')
+    .addToUi();
+}
+
+function openForm() {
+  var html = HtmlService.createHtmlOutputFromFile('Index')
+    .setWidth(1050)
+    .setHeight(760)
+    .setTitle('ABCD Company - Weekly Marketing Plan');
+  SpreadsheetApp.getUi().showModalDialog(html, 'Weekly Sales Plan Form');
+}
+
+function doGet(e) {
+  return HtmlService.createHtmlOutputFromFile('Index')
+    .setTitle('ABCD Company - Weekly Sales Plan')
+    .addMetaTag('viewport', 'width=device-width, initial-scale=1.0')
+    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+}
+
+// ==================== EMAIL ACCESS MAPPING ====================
+function getAccessFromEmail(email) {
+  if (!email) return null;
+  var cleaned = email.toLowerCase().trim();
+
+  var adminEmails = ['khushipainter410@gmail.com'];
+
+  var salesMap = {
+    '':         'Mr. Jain',
+    '': 'Mr. Chauhan',
+    '':  'Mr. Negi'
+  };
+
+  for (var i = 0; i < adminEmails.length; i++) {
+    if (adminEmails[i].toLowerCase().trim() === cleaned) {
+      return { person: 'Admin', isAdmin: true };
+    }
+  }
+  for (var key in salesMap) {
+    if (salesMap.hasOwnProperty(key) && key.toLowerCase().trim() === cleaned) {
+      return { person: salesMap[key], isAdmin: false };
+    }
+  }
+  return null;
+}
+
+// ==================== GET FORM INIT DATA (email passed from client) ====================
+function getFormInitData(emailFromClient) {
+  try {
+    var email = (emailFromClient || '').toLowerCase().trim();
+
+    if (!email) {
+      throw new Error('Could not determine your email. Please try again.');
+    }
+
+    var access = getAccessFromEmail(email);
+    if (!access) {
+      throw new Error(
+        'Access Denied!\n\nYour email (' + email + ') is not authorised.\n' +
+        'Only registered sales persons can access this form.\n\nPlease contact the administrator.'
+      );
+    }
+
+    var ALL_PEOPLE = ['Mr. Jain', 'Mr. Chauhan', 'Mr. Negi'];
+    var salespeople = access.isAdmin ? ALL_PEOPLE : [access.person];
+
+    var result = {
+      currentUser: access.person,
+      isAdmin:     access.isAdmin,
+      salespeople: salespeople,
+      weeks:       []
+    };
+
+    var today         = new Date();
+    var currentMonday = getMondayOfWeek_(today);
+    var dayNames      = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
+
+    for (var w = -2; w <= 1; w++) {
+      var mon = new Date(currentMonday.getTime());
+      mon.setDate(mon.getDate() + (w * 7));
+      var sun = new Date(mon.getTime());
+      sun.setDate(sun.getDate() + 6);
+      var days = [];
+      for (var d = 0; d < 7; d++) {
+        var dd = new Date(mon.getTime());
+        dd.setDate(dd.getDate() + d);
+        days.push({ day: dayNames[d], date: formatDate_(dd), dateShort: formatDateShort_(dd) });
+      }
+      var weekNum   = getISOWeekNumber_(mon);
+      var label     = formatDate_(mon) + ' to ' + formatDate_(sun);
+      var isCurrent = (w === 0);
+      var isNext    = (w === 1);
+      if (isCurrent) label += ' << Current Week';
+      if (isNext)    label += ' << Next Week';
+      result.weeks.push({ mondayStr: formatDate_(mon), label: label, days: days, isCurrent: isCurrent, isNext: isNext, weekNum: weekNum });
+    }
+    return result;
+  } catch(e) {
+    throw new Error(e.message);
+  }
+}
+
+// ==================== FIRST TIME SETUP ====================
+function firstTimeSetup() {
+  var ui = SpreadsheetApp.getUi();
+  var response = ui.alert(
+    'Setup ABCD Company Weekly Plan',
+    'This will create tabs for all 3 salespeople and set Saturday auto-trigger.\n\nContinue?',
+    ui.ButtonSet.YES_NO
+  );
+  if (response !== ui.Button.YES) return;
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  ss.rename('ABCD Company - Weekly Sales Plan');
+
+  var people      = ['Rishabh Jain', 'Sonu Chauhan', 'Pawan Negi'];
+  var defaultSheet = ss.getSheetByName('Sheet1');
+
+  for (var p = 0; p < people.length; p++) {
+    if (!ss.getSheetByName(people[p])) {
+      var sheet = ss.insertSheet(people[p]);
+      buildSheetHeader_(sheet, 'Mr. ' + people[p]);
+    }
+  }
+
+  if (defaultSheet) { try { ss.deleteSheet(defaultSheet); } catch(e) {} }
+
+  addNextWeekBlock();
+  setupWeeklyTrigger();
+
+  ui.alert('Setup Complete!\n\nUse Weekly Plan > Open Plan Form to fill plans.');
+}
+
+// ==================== BUILD SHEET HEADER ====================
+function buildSheetHeader_(sheet, personName) {
+  sheet.setColumnWidth(1, 40);
+  sheet.setColumnWidth(2, 120);
+  sheet.setColumnWidth(3, 170);
+  sheet.setColumnWidth(4, 320);
+  sheet.setColumnWidth(5, 110);
+  sheet.setColumnWidth(6, 150);
+  sheet.setColumnWidth(7, 160);
+  sheet.setColumnWidth(8, 160);
+
+  sheet.setRowHeight(1, 42);
+  sheet.getRange('A1:H1').merge()
+    .setValue('ABCD Company \u2014 WEEKLY MARKETING PLAN')
+    .setFontFamily('Arial').setFontSize(16).setFontWeight('bold').setFontColor('#FFFFFF')
+    .setBackground('#2E7D32').setHorizontalAlignment('center').setVerticalAlignment('middle');
+
+  sheet.setRowHeight(2, 5);
+  sheet.getRange('A2:H2').setBackground('#F9A825');
+
+  sheet.setRowHeight(3, 28);
+  sheet.getRange('A3:B3').merge().setValue('Sales Person:')
+    .setFontFamily('Arial').setFontSize(10).setFontWeight('bold').setFontColor('#424242')
+    .setHorizontalAlignment('right').setVerticalAlignment('middle');
+  sheet.getRange('C3:D3').merge().setValue(personName)
+    .setFontFamily('Arial').setFontSize(12).setFontWeight('bold').setFontColor('#2E7D32')
+    .setHorizontalAlignment('left').setVerticalAlignment('middle');
+  sheet.getRange('E3').setValue('Division:')
+    .setFontFamily('Arial').setFontSize(10).setFontWeight('bold').setFontColor('#424242')
+    .setHorizontalAlignment('right').setVerticalAlignment('middle');
+  sheet.getRange('F3:H3').merge().setValue('Sales & Marketing')
+    .setFontFamily('Arial').setFontSize(10).setFontColor('#424242');
+
+  sheet.setFrozenRows(3);
+}
+
+// ==================== HELPER: READ CELL TEXT ====================
+function getCellText_(sheet, row, col) {
+  var cell = sheet.getRange(row, col);
+  var text = '';
+  try { var rtv = cell.getRichTextValue(); if (rtv) text = rtv.getText(); } catch(e) {}
+  if (!text) { try { text = cell.getDisplayValue(); } catch(e) {} }
+  if (!text) { try { text = String(cell.getValue() || ''); } catch(e) {} }
+  return text || '';
+}
+
+// ==================== FIND WEEK HEADER ROW ====================
+function findWeekHeaderRow_(sheet, weekStart) {
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 1) return -1;
+  for (var r = 1; r <= lastRow; r++) {
+    var cellText = getCellText_(sheet, r, 1);
+    if (cellText.indexOf('WEEK No.') !== -1 && cellText.indexOf(weekStart) !== -1) return r;
+  }
+  return -1;
+}
+
+// ==================== LOAD EXISTING PLAN (email passed from client) ====================
+function loadExistingPlan(personTab, weekStart, emailFromClient) {
+  try {
+    var email  = (emailFromClient || '').toLowerCase().trim();
+    var access = getAccessFromEmail(email);
+    if (!access) return null;
+
+    if (!access.isAdmin) {
+      var expectedTab = access.person.replace('Mr. ', '');
+      if (expectedTab !== personTab) return null;
+    }
+
+    var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(personTab);
+    if (!sheet) return null;
+
+    var weekHeaderRow = findWeekHeaderRow_(sheet, weekStart);
+    if (weekHeaderRow === -1) return null;
+
+    var dataStartRow = weekHeaderRow + 2;
+    var lastRow      = sheet.getLastRow();
+    if (dataStartRow + 6 > lastRow) return null;
+
+    var data   = sheet.getRange(dataStartRow, 1, 7, 8).getDisplayValues();
+    var result = [];
+
+    for (var i = 0; i < 7; i++) {
+      var serial = parseInt(data[i][0]);
+      if (isNaN(serial) || serial < 1 || serial > 7) return null;
+      result.push({ area: data[i][2] || '', description: data[i][3] || '', status: data[i][4] || '', remarks: data[i][5] || '' });
+    }
+    return result.length === 7 ? result : null;
+  } catch(e) { return null; }
+}
+
+// ==================== SAVE PLAN (email passed from client) ====================
+function savePlan(formData, emailFromClient) {
+  try {
+    var email  = (emailFromClient || '').toLowerCase().trim();
+    var access = getAccessFromEmail(email);
+
+    if (!access) {
+      return { success: false, message: 'Access Denied!\n\nYour email (' + (email || 'unknown') + ') is not registered.' };
+    }
+
+    if (!access.isAdmin && formData.person !== access.person) {
+      return { success: false, message: 'Access Denied!\n\nYou can only save your own plan.\nLogged in as: ' + access.person };
+    }
+
+    var personTab = formData.person.replace('Mr. ', '');
+    var sheet     = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(personTab);
+    if (!sheet) return { success: false, message: 'Sheet "' + personTab + '" not found.' };
+
+    var monday    = parseDate_(formData.mondayStr);
+    if (!monday)  return { success: false, message: 'Invalid week date.' };
+
+    var weekStart     = formatDate_(monday);
+    var weekHeaderRow = findWeekHeaderRow_(sheet, weekStart);
+
+    if (weekHeaderRow === -1) {
+      addWeekToSheet_(sheet, monday);
+      SpreadsheetApp.flush();
+      weekHeaderRow = findWeekHeaderRow_(sheet, weekStart);
+    }
+    if (weekHeaderRow === -1) return { success: false, message: 'Could not find or create week block.' };
+
+    var dataStartRow = weekHeaderRow + 2;
+    var now      = new Date();
+    var nowStamp = Utilities.formatDate(now, Session.getScriptTimeZone(), 'dd-MMM-yyyy hh:mm a');
+    var newlyFilled = [], changed = [];
+
+    for (var d = 0; d < 7; d++) {
+      var row     = dataStartRow + d;
+      var dayData = formData.days[d];
+
+      var currentArea    = String(sheet.getRange(row, 3).getValue() || '');
+      var currentDesc    = String(sheet.getRange(row, 4).getValue() || '');
+      var currentStatus  = String(sheet.getRange(row, 5).getValue() || '');
+      var currentRemarks = String(sheet.getRange(row, 6).getValue() || '');
+      var currentStamp   = String(sheet.getRange(row, 7).getValue() || '');
+
+      var newArea    = dayData.area        || '';
+      var newDesc    = dayData.description || '';
+      var newStatus  = dayData.status      || 'Planned';
+      var newRemarks = dayData.remarks     || '';
+
+      var formHasData        = !!(newArea || newDesc || newRemarks);
+      var sheetAlreadyFilled = !!currentStamp;
+      var dataChanged        = (currentArea !== newArea || currentDesc !== newDesc || currentStatus !== newStatus || currentRemarks !== newRemarks);
+
+      if (!formHasData && !sheetAlreadyFilled) continue;
+
+      if (formHasData && !sheetAlreadyFilled) {
+        sheet.getRange(row, 3).setValue(newArea);
+        sheet.getRange(row, 4).setValue(newDesc);
+        sheet.getRange(row, 5).setValue(newStatus);
+        sheet.getRange(row, 6).setValue(newRemarks);
+        sheet.getRange(row, 7).setValue(nowStamp);
+        newlyFilled.push(d + 1);
+        continue;
+      }
+
+      if (sheetAlreadyFilled && dataChanged) {
+        sheet.getRange(row, 3).setValue(newArea);
+        sheet.getRange(row, 4).setValue(newDesc);
+        sheet.getRange(row, 5).setValue(newStatus);
+        sheet.getRange(row, 6).setValue(newRemarks);
+        sheet.getRange(row, 8).setValue(nowStamp);
+        changed.push(d + 1);
+        continue;
+      }
+    }
+
+    SpreadsheetApp.flush();
+
+    if ((newlyFilled.length + changed.length) === 0) {
+      return { success: true, message: 'No changes detected.\n\nSales Person: ' + formData.person + '\nWeek: ' + weekStart };
+    }
+
+    var msgLines = ['Plan saved successfully!', '', 'Sales Person: ' + formData.person, 'Week: ' + weekStart];
+    if (newlyFilled.length > 0) msgLines.push('Newly filled days: ' + newlyFilled.join(', '));
+    if (changed.length > 0)     msgLines.push('Edited days: ' + changed.join(', '));
+    msgLines.push('Saved at: ' + nowStamp);
+
+    return { success: true, message: msgLines.join('\n') };
+  } catch(e) {
+    return { success: false, message: 'Save failed: ' + e.message };
+  }
+}
+
+// ==================== ADD NEXT WEEK BLOCK ====================
+function addNextWeekBlock() {
+  var ss         = SpreadsheetApp.getActiveSpreadsheet();
+  var sheetNames = ['Rishabh Jain', 'Sonu Chauhan', 'Pawan Negi'];
+  var nextMonday = getNextMonday_(new Date());
+  var weekLabel  = formatDate_(nextMonday);
+  var oldestMonday = new Date(nextMonday.getTime());
+  oldestMonday.setDate(oldestMonday.getDate() - 21);
+
+  for (var s = 0; s < sheetNames.length; s++) {
+    var sheet = ss.getSheetByName(sheetNames[s]);
+    if (!sheet) continue;
+
+    var lastRow = sheet.getLastRow();
+    if (lastRow >= 1) {
+      for (var r = 1; r <= lastRow; r++) {
+        var cellText = getCellText_(sheet, r, 1);
+        if (cellText.indexOf('WEEK No.') !== -1) {
+          var match = cellText.match(/(\d{2}-[A-Za-z]{3}-\d{4})/);
+          if (match) {
+            var weekStartDate = parseDate_(match[1]);
+            if (weekStartDate && weekStartDate < oldestMonday) {
+              var deleteCount = Math.min(10, lastRow - r + 1);
+              sheet.deleteRows(r, deleteCount);
+              lastRow = sheet.getLastRow();
+              r--;
+            }
+          }
+        }
+      }
+    }
+    if (findWeekHeaderRow_(sheet, weekLabel) === -1) addWeekToSheet_(sheet, nextMonday);
+  }
+}
+
+// ==================== ADD WEEK TO SHEET ====================
+function addWeekToSheet_(sheet, monday) {
+  var startRow = Math.max(sheet.getLastRow() + 2, 4);
+  var days     = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
+
+  var DARK_GREEN = '#2E7D32', WEEK_BG = '#1B5E20', GOLD = '#F9A825';
+  var LIGHT_GREEN = '#E8F5E9', CREAM = '#FFF8E1', LIGHT_GOLD = '#FFF9C4';
+  var WHITE = '#FFFFFF', DARK_GRAY = '#424242';
+
+  var weekEnd = new Date(monday.getTime());
+  weekEnd.setDate(weekEnd.getDate() + 6);
+  var weekNum = getISOWeekNumber_(monday);
+
+  var headerCell = sheet.getRange(startRow, 1, 1, 8);
+  headerCell.merge();
+  sheet.setRowHeight(startRow, 30);
+  headerCell.setBackground(WEEK_BG).setHorizontalAlignment('center').setVerticalAlignment('middle');
+
+  var weekNoText = 'WEEK No. ' + weekNum;
+  var dateText   = '   |   ' + formatDate_(monday) + '  to  ' + formatDate_(weekEnd);
+  var fullText   = weekNoText + dateText;
+
+  var richText = SpreadsheetApp.newRichTextValue()
+    .setText(fullText)
+    .setTextStyle(0, weekNoText.length,
+      SpreadsheetApp.newTextStyle().setForegroundColor('#FF5252').setBold(true).setFontSize(13).setFontFamily('Arial').build())
+    .setTextStyle(weekNoText.length, fullText.length,
+      SpreadsheetApp.newTextStyle().setForegroundColor(WHITE).setBold(true).setFontSize(12).setFontFamily('Arial').build())
+    .build();
+  sheet.getRange(startRow, 1).setRichTextValue(richText);
+
+  var hr = startRow + 1;
+  sheet.getRange(hr, 1, 1, 8)
+    .setValues([['#', 'Day / Date', 'Area Name', 'Description / Plan Details', 'Status', 'Remarks', 'Timestamp', 'Changes Timestamp']])
+    .setFontFamily('Arial').setFontSize(10).setFontWeight('bold').setFontColor(WHITE)
+    .setBackground(DARK_GREEN).setHorizontalAlignment('center').setVerticalAlignment('middle')
+    .setBorder(true, true, true, true, true, true, '#BDBDBD', SpreadsheetApp.BorderStyle.SOLID);
+  sheet.setRowHeight(hr, 28);
+
+  var dr = hr + 1;
+  for (var i = 0; i < 7; i++) {
+    var cd  = new Date(monday.getTime());
+    cd.setDate(cd.getDate() + i);
+    var row = dr + i;
+    var bg  = (i % 2 === 0) ? LIGHT_GREEN : WHITE;
+    sheet.setRowHeight(row, 48);
+
+    sheet.getRange(row, 1).setValue(i + 1).setBackground(bg)
+      .setFontFamily('Arial').setFontSize(10).setFontColor(DARK_GRAY).setHorizontalAlignment('center').setVerticalAlignment('middle');
+    sheet.getRange(row, 2).setValue(days[i] + '\n' + formatDateShort_(cd)).setBackground(bg)
+      .setFontFamily('Arial').setFontSize(10).setFontWeight('bold').setFontColor(DARK_GREEN)
+      .setHorizontalAlignment('center').setVerticalAlignment('middle').setWrap(true);
+    sheet.getRange(row, 3).setBackground(CREAM).setVerticalAlignment('top').setWrap(true).setFontFamily('Arial').setFontSize(10).setFontColor(DARK_GRAY);
+    sheet.getRange(row, 4).setBackground(CREAM).setVerticalAlignment('top').setWrap(true).setFontFamily('Arial').setFontSize(10).setFontColor(DARK_GRAY);
+    sheet.getRange(row, 5).setBackground(LIGHT_GOLD).setHorizontalAlignment('center').setVerticalAlignment('middle').setFontFamily('Arial').setFontSize(10).setFontColor(DARK_GRAY);
+    sheet.getRange(row, 6).setBackground(CREAM).setVerticalAlignment('top').setWrap(true).setFontFamily('Arial').setFontSize(10).setFontColor(DARK_GRAY);
+    sheet.getRange(row, 7).setBackground('#E8EAF6').setVerticalAlignment('middle').setHorizontalAlignment('center').setWrap(true).setFontFamily('Arial').setFontSize(9).setFontColor('#5C6BC0');
+    sheet.getRange(row, 8).setBackground('#FFF3E0').setVerticalAlignment('middle').setHorizontalAlignment('center').setWrap(true).setFontFamily('Arial').setFontSize(9).setFontColor('#E65100');
+    sheet.getRange(row, 1, 1, 8).setBorder(true, true, true, true, true, true, '#BDBDBD', SpreadsheetApp.BorderStyle.SOLID);
+  }
+
+  var rule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(['Planned', 'Completed', 'Rescheduled', 'Cancelled'], true)
+    .setAllowInvalid(false).build();
+  sheet.getRange(dr, 5, 7, 1).setDataValidation(rule);
+
+  var sepRow = dr + 7;
+  sheet.getRange(sepRow, 1, 1, 8).setBackground(GOLD);
+  sheet.setRowHeight(sepRow, 5);
+}
+
+// ==================== TRIGGER SETUP ====================
+function setupWeeklyTrigger() {
+  var triggers = ScriptApp.getProjectTriggers();
+  for (var t = 0; t < triggers.length; t++) {
+    if (triggers[t].getHandlerFunction() === 'addNextWeekBlock') ScriptApp.deleteTrigger(triggers[t]);
+  }
+  ScriptApp.newTrigger('addNextWeekBlock').timeBased().onWeekDay(ScriptApp.WeekDay.SATURDAY).atHour(6).create();
+}
+
+// ==================== HELPER FUNCTIONS ====================
+function getMondayOfWeek_(date) {
+  var d = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  var day = d.getDay();
+  d.setDate(d.getDate() + ((day === 0) ? -6 : (1 - day)));
+  return d;
+}
+
+function getNextMonday_(fromDate) {
+  var d = new Date(fromDate.getFullYear(), fromDate.getMonth(), fromDate.getDate());
+  var day = d.getDay();
+  if (day === 1) return d;
+  d.setDate(d.getDate() + ((day === 0) ? 1 : (8 - day)));
+  return d;
+}
+
+function parseDate_(str) {
+  try {
+    var parts  = str.split('-');
+    if (parts.length !== 3) return null;
+    var months = {'Jan':0,'Feb':1,'Mar':2,'Apr':3,'May':4,'Jun':5,'Jul':6,'Aug':7,'Sep':8,'Oct':9,'Nov':10,'Dec':11};
+    var dd = parseInt(parts[0], 10), mm = months[parts[1]], yy = parseInt(parts[2], 10);
+    if (isNaN(dd) || mm === undefined || isNaN(yy)) return null;
+    return new Date(yy, mm, dd);
+  } catch(e) { return null; }
+}
+
+function formatDate_(d) {
+  var m = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  return padZero_(d.getDate()) + '-' + m[d.getMonth()] + '-' + d.getFullYear();
+}
+
+function formatDateShort_(d) {
+  var m = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  return padZero_(d.getDate()) + '-' + m[d.getMonth()];
+}
+
+function padZero_(n) { return n < 10 ? '0' + n : '' + n; }
+
+function getISOWeekNumber_(date) {
+  var d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  var dayNum = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+  var yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  return Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+}
