@@ -20,8 +20,10 @@ Google Apps Script + Google Sheets.
 - Google Sign-In (OAuth 2.0)
 
 ## 📸 Screenshots
-<img width="792" height="528" alt="image" src="https://github.com/user-attachments/assets/def7a3a2-3325-4efa-ba39-eade97260d0e" />
-<img width="1364" height="598" alt="image" src="https://github.com/user-attachments/assets/dddcd4ce-3999-4bf1-8a67-aace633e2b25" />
+<img width="792" height="528" alt="image" src="<img width="431" height="350" alt="image" src="https://github.com/user-attachments/assets/c4483589-c40e-4530-8b72-29771d2b886a" />
+" />
+<img width="1364" height="598" alt="image" src="<img width="943" height="462" alt="image" src="https://github.com/user-attachments/assets/9005b318-8b89-4550-99ca-ff514022c194" />
+" />
 
 
 ## 🚀 How to Deploy
